@@ -47,7 +47,7 @@ Private では何も動かさない。`<public>` で動くのは:
 
 - 要望（不具合も要望の形）: `<public>` の Issue の Request テンプレだけ。受けたら `request-to-backlog` の「公開側の Issue から」で Private の要望 Issue にする。公開側に Private の番号・内部の情報を書かない
 - 脆弱性: `SECURITY.md` の案内の Security Advisory
-- 質問: Discussions（公開の日に有効にする。#830）
+- 質問: Discussions
 - Pull Request: 受け付けない（上の `close-pull-requests.yml`）
 
 ## 公開する日
@@ -59,3 +59,9 @@ Private では何も動かさない。`<public>` で動くのは:
   - 切り替えた後の数: open の Issue 89・Project の項目 745・リリース 211・PR 370（全状態）
   - 前の数は取っていない（記録の前に切り替わっていた）。今のデータを作成・クローズの日時で 11:20 UTC（最後に Actions が動いた push）に戻すと Issue 89・項目 745・リリース 211・PR 369 で、差は切り替えの後に出した #960 だけ。ただし今のデータから出した数なので、切り替えで消えたものがあっても見つけられない
   - 以後、Private 側の Actions はジョブのステップ 0 件で失敗する（#960 で確かめた）
+- 2026-10-31: 公開（#830）。Private で作って同期してから、利用者の指示で Public にした
+  - 公開前ゲートは 1 ランナー（tree `54ab9dc`。verdict pass、high 0 件、振り分け前）だけ通し、もう 1 ランナーは利用者の判断で公開の後に回す（#1023）。今の公開 tree `a56edc5` は `54ab9dc` からテスト 1 行だけ違い、ゲートはまだ通していない
+  - 初回は tree `54ab9dc` を main へ直接 push。CI の `scripts` の 1 件が `exclude` のファイルの存在確認で落ちたので #1024 で直し、2 回目の同期（tree `a56edc5`）で `integration` まで成功した
+  - 公開側: Discussions と脆弱性の非公開報告は有効（後者は Public にした後でないと有効にできない）、merge は Rebase and merge だけ、secrets は 0 件、起票された Issue は 0 件
+  - 公開側の CI のログ（main の push の実行）に、開発用の名前・ホームパス・認証に使える値の形は無かった（`git grep` 相当の文字列の検索と `ops-kit scan-text`）
+  - 旧名 `iunct-lab/Decentralized-Agent-Kit` は 404。旧 URL の参照は公開側のツリー（Issue テンプレはキットの 1 式に置き換わる）、手元の記事のリポジトリ、PyPI の同名のパッケージに無い。ほかの外部の参照は調べていない
