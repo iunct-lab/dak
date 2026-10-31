@@ -24,7 +24,7 @@ def test_public_sync_targets_the_public_repository():
 
     assert set(sync) == {"target", "exclude", "rewrite"}
     assert sync["target"] == "iunct-lab/dak"
-    for rel in sync["exclude"] + sync["rewrite"]:
+    for rel in sync["rewrite"]:  # exclude is absent from the public tree, where this test also runs
         assert (ROOT / rel).exists(), rel
 
 
