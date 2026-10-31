@@ -1,0 +1,16 @@
+services:
+  inspect-server:  # a caller's inspection endpoint (dak:inspection)
+    build: ./tests/integration/inspect_server
+    ports:
+      - "127.0.0.1:8090:8080"
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8080/health')"]
+      interval: 2s
+      timeout: 5s
+      retries: 15
+
+  agent:
+    environment:
+      - DAK_ALLOWED_INSPECTION_URLS=http://inspect-server:8080/validate
+    depends_on:
+      inspect-server: {condition: service_started}

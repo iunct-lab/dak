@@ -1,0 +1,69 @@
+# ラベル体系（宣言的）。`.github/workflows/labels.yml` が main への push で同期する。
+# 色は 6桁hex（# なし）。
+
+# --- 種別 / Type ---
+- name: bug
+  color: d73a4a
+  description: 想定と異なる動作
+- name: enhancement
+  color: a2eeef
+  description: 新機能・改善
+- name: docs
+  color: 0075ca
+  description: ドキュメント
+
+# --- 自動化ドメイン / Automation domains ---
+- name: deps
+  color: 0366d6
+  description: 依存ライブラリの更新
+- name: security
+  color: b60205
+  description: 脆弱性・セキュリティ
+- name: feature-sync
+  color: 5319e7
+  description: 依存の新機能の取り込み提案
+- name: tech-watch
+  color: 1d76db
+  description: 憲章に基づく新技術の採用提案
+- name: charter
+  color: c5def5
+  description: 目的憲章(CHARTER.md)の見直し
+- name: eval
+  color: fbca04
+  description: 継続テスト・評価(eval)
+- name: automation
+  color: ededed
+  description: 自動化ワークフロー由来
+
+# --- トリアージ状態 / Triage state ---
+- name: auto-merge-candidate
+  color: 0e8a16
+  description: 自動マージ対象（安全な更新）
+- name: needs-human-review
+  color: e99695
+  description: 人間のレビューが必要
+
+# --- 対象コンポーネント / Area（CIマトリクスと一致）---
+- name: "area:agent"
+  color: bfdadc
+  description: agent コンポーネント
+- name: "area:mcp"
+  color: bfdadc
+  description: mcp-server コンポーネント
+- name: "area:bff"
+  color: bfdadc
+  description: bff コンポーネント
+- name: "area:cli"
+  color: bfdadc
+  description: cli コンポーネント
+
+# --- Backlog の階層（要望 → PBI → Task）---
+- name: "type:request"
+  color: d4c5f9
+  description: 採否未定の要望・自動提案（意図を変えずに整えた文で残す）
+- name: "type:pbi"
+  color: 0052cc
+  description: 利用者価値・検証条件・Story Points
+- name: "type:task"
+  color: 1d76db
+  description: PBIのsub-issue、1 Task = 1 PR

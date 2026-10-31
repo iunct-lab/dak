@@ -1,0 +1,14 @@
+httpx 0.28.0 — summary of the release notes (written for this fixture, not a copy)
+
+Deprecations:
+- Passing `verify` as a string (a path to a CA bundle) is deprecated and now emits a warning; use an SSL context instead.
+- The `cert` argument is deprecated and now emits a warning.
+
+Removals and behaviour changes:
+- The `proxies` argument, deprecated earlier, is removed. Use `proxy` or mounts.
+- The `app` argument, deprecated earlier, is removed. Use an explicit transport.
+- JSON request bodies are serialized compactly (no spaces after separators).
+- URL percent-escaping follows the WHATWG URL spec.
+- Passing `params={}` replaces the existing query string instead of merging with it.
+- `socks5h` is accepted as a proxy scheme.
+- `certifi` and `httpcore` are imported only when needed.

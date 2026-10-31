@@ -1,0 +1,299 @@
+import glob
+import logging
+import os
+import re
+import tempfile
+import unittest
+import unittest.mock
+
+from dak_agent import config as config_module
+from dak_agent.config import (
+    DEFAULT_MODEL_NAME,
+    AgentConfig,
+    get_litellm_model_name,
+    load_agent_config,
+    resolve_model_name,
+    skills_dirs_from_env,
+)
+
+_REPO_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".."))
+
+
+class TestLoadAgentConfig(unittest.TestCase):
+    def _write_config(self, content: str) -> str:
+        f = tempfile.NamedTemporaryFile("w", suffix=".yaml", delete=False)
+        f.write(content)
+        f.close()
+        self.addCleanup(os.unlink, f.name)
+        return f.name
+
+    def test_load_full_config(self):
+        path = self._write_config(
+            """
+mcp_servers:
+  - name: "local-mcp"
+    url: "http://mcp-server:8000/mcp"
+    type: "http"
+  - name: "extra-mcp"
+    url: "http://extra:8000/sse"
+    type: "sse"
+
+a2a_peers:
+  - name: "agent_provider"
+    url: "http://agent-provider:8000"
+    capabilities: ["premium_service"]
+"""
+        )
+        config = load_agent_config(path)
+        self.assertEqual(set(config.mcp_servers), {"local-mcp", "extra-mcp"})
+        self.assertEqual(config.mcp_servers["extra-mcp"]["type"], "sse")
+        self.assertEqual(len(config.a2a_peers), 1)
+        self.assertEqual(config.a2a_peers[0]["name"], "agent_provider")
+
+    def test_missing_file_returns_empty_config(self):
+        config = load_agent_config("/nonexistent/agent_config.yaml")
+        self.assertEqual(config, AgentConfig())
+
+    def test_malformed_entries_are_skipped(self):
+        path = self._write_config(
+            """
+mcp_servers:
+  - url: "http://no-name:8000"
+  - name: "good"
+    url: "http://good:8000/mcp"
+"""
+        )
+        config = load_agent_config(path)
+        self.assertEqual(set(config.mcp_servers), {"good"})
+
+    def test_empty_file(self):
+        path = self._write_config("")
+        config = load_agent_config(path)
+        self.assertEqual(config, AgentConfig())
+
+
+class TestAgentConfigDir(unittest.TestCase):
+    """One-entry-per-file MCP servers and A2A peers in agent_config.d/ next to the config file."""
+
+    def setUp(self):
+        tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(tmp.cleanup)
+        self.root = tmp.name
+        self.config_path = self._write("agent_config.yaml", "permissions: []\n")
+
+    def _write(self, relpath: str, content: str) -> str:
+        path = os.path.join(self.root, relpath)
+        os.makedirs(os.path.dirname(path), exist_ok=True)
+        with open(path, "w") as f:
+            f.write(content)
+        return path
+
+    def test_dir_mcp_servers_are_read(self):
+        self._write("agent_config.d/mcp_servers/a.yaml", 'name: "a"\nurl: "http://a:8000/mcp"\ntype: "http"\n')
+        self._write("agent_config.d/mcp_servers/b.yaml", 'name: "b"\nurl: "http://b:8000/sse"\ntype: "sse"\n')
+        config = load_agent_config(self.config_path, env={})
+        self.assertEqual(set(config.mcp_servers), {"a", "b"})
+        self.assertEqual(config.mcp_servers["b"]["type"], "sse")
+
+    def test_dir_entry_without_required_env_is_dropped(self):
+        self._write(
+            "agent_config.d/mcp_servers/search.yaml",
+            'name: "search"\nurl: "http://s/mcp"\nbearer_token_env: "S_KEY"\nrequires_env: ["S_KEY"]\n',
+        )
+        self.assertEqual(load_agent_config(self.config_path, env={}).mcp_servers, {})
+        config = load_agent_config(self.config_path, env={"S_KEY": "k"})
+        self.assertEqual(config.mcp_servers["search"]["headers"], {"Authorization": "Bearer k"})
+
+    def test_loaded_line_is_logged(self):
+        self._write("agent_config.d/mcp_servers/a.yaml", 'name: "a"\nurl: "http://a:8000/mcp"\n')
+        self._write("agent_config.d/a2a_peers/p.yaml", 'name: "p"\nurl: "http://p:8000/a2a/dak_agent"\n')
+        with self.assertLogs("dak_agent.config", "INFO") as logs:
+            load_agent_config(self.config_path, env={})
+        self.assertIn(
+            f"Loaded agent config from {self.config_path} (+2 file(s) from agent_config.d): "
+            "1 MCP server(s), 1 A2A peer(s)",
+            "\n".join(logs.output),
+        )
+
+    def test_disabled_server_line_names_variable_only(self):
+        self._write(
+            "agent_config.d/mcp_servers/search.yaml",
+            'name: "search"\nurl: "http://s/mcp"\nbearer_token_env: "S_KEY"\nrequires_env: ["S_KEY"]\n',
+        )
+        with self.assertLogs("dak_agent.config", "INFO") as logs:
+            load_agent_config(self.config_path, env={})
+        self.assertIn("MCP server 'search' is disabled: S_KEY not set", "\n".join(logs.output))
+        with self.assertLogs("dak_agent.config", "INFO") as logs:
+            load_agent_config(self.config_path, env={"S_KEY": "secret-value"})
+        self.assertNotIn("is disabled", "\n".join(logs.output))
+        self.assertNotIn("secret-value", "\n".join(logs.output))
+
+    def test_dir_a2a_peer_is_read(self):
+        self._write("agent_config.d/a2a_peers/p.yaml", 'name: "p"\nurl: "http://p:8000/a2a/dak_agent"\n')
+        config = load_agent_config(self.config_path, env={})
+        self.assertEqual([peer["name"] for peer in config.a2a_peers], ["p"])
+
+    def test_duplicate_name_names_both_sources(self):
+        entry = self._write("agent_config.d/mcp_servers/a.yaml", 'name: "a"\nurl: "http://a:8000/mcp"\n')
+        # In the config file and in an entry file.
+        in_file = self._write("in_file/agent_config.yaml", 'mcp_servers:\n  - name: "a"\n    url: "http://x/mcp"\n')
+        in_file_entry = self._write("in_file/agent_config.d/mcp_servers/a.yaml", 'name: "a"\nurl: "http://a/mcp"\n')
+        with self.assertRaises(ValueError) as cm:
+            load_agent_config(in_file, env={})
+        self.assertIn(in_file, str(cm.exception))
+        self.assertIn(in_file_entry, str(cm.exception))
+        # In two entry files; one that requires_env drops still counts.
+        other = self._write(
+            "agent_config.d/mcp_servers/z.yaml", 'name: "a"\nurl: "http://z/mcp"\nrequires_env: ["UNSET"]\n'
+        )
+        with self.assertRaises(ValueError) as cm:
+            load_agent_config(self.config_path, env={})
+        self.assertIn(entry, str(cm.exception))
+        self.assertIn(other, str(cm.exception))
+        # A2A peers likewise.
+        os.unlink(other)
+        p1 = self._write("agent_config.d/a2a_peers/p1.yaml", 'name: "p"\nurl: "http://p1"\n')
+        p2 = self._write("agent_config.d/a2a_peers/p2.yaml", 'name: "p"\nurl: "http://p2"\n')
+        with self.assertRaises(ValueError) as cm:
+            load_agent_config(self.config_path, env={})
+        self.assertIn("A2A peer", str(cm.exception))
+        self.assertIn(p1, str(cm.exception))
+        self.assertIn(p2, str(cm.exception))
+
+    def test_entry_file_without_name_fails(self):
+        bad = self._write("agent_config.d/mcp_servers/bad.yaml", 'url: "http://no-name/mcp"\n')
+        with self.assertRaises(ValueError) as cm:
+            load_agent_config(self.config_path, env={})
+        self.assertIn(bad, str(cm.exception))
+        self._write("agent_config.d/mcp_servers/bad.yaml", '- name: "a list, not a mapping"\n')
+        with self.assertRaises(ValueError) as cm:
+            load_agent_config(self.config_path, env={})
+        self.assertIn(bad, str(cm.exception))
+
+
+class TestConfigLogHandler(unittest.TestCase):
+    def test_logger_writes_to_stderr_without_propagating(self):
+        logger = config_module.logger
+        # pytest adds its own capture handlers while a test runs.
+        self.assertEqual(len([h for h in logger.handlers if type(h) is logging.StreamHandler]), 1)
+        self.assertFalse(logger.propagate)
+        self.assertEqual(logger.level, logging.INFO)
+
+
+class TestLitellmModelName(unittest.TestCase):
+    def test_gemini_gets_prefixed(self):
+        self.assertEqual(get_litellm_model_name("gemini-2.5-flash"), "gemini/gemini-2.5-flash")
+
+    def test_prefixed_gemini_unchanged(self):
+        self.assertEqual(get_litellm_model_name("gemini/gemini-2.5-flash"), "gemini/gemini-2.5-flash")
+
+    def test_other_models_unchanged(self):
+        self.assertEqual(get_litellm_model_name("openai/gpt-4o"), "openai/gpt-4o")
+        self.assertEqual(get_litellm_model_name("claude-3-opus"), "claude-3-opus")
+
+
+class TestResolveModelName(unittest.TestCase):
+    def test_model_name_wins(self):
+        env = {"MODEL_NAME": "openai/llamacpp", "GEMINI_MODEL_NAME": "gemini-x"}
+        self.assertEqual(resolve_model_name(env), "openai/llamacpp")
+
+    def test_gemini_model_name_is_ignored(self):
+        """The old GEMINI_MODEL_NAME alias is gone; only MODEL_NAME picks the model."""
+        self.assertEqual(resolve_model_name({"GEMINI_MODEL_NAME": "gemini-x"}), DEFAULT_MODEL_NAME)
+
+    def test_unset_falls_back_to_default(self):
+        self.assertEqual(resolve_model_name({}), DEFAULT_MODEL_NAME)
+
+    def test_blank_counts_as_unset(self):
+        """`MODEL_NAME=` in .env, or an empty shell export, arrives as ""."""
+        self.assertEqual(resolve_model_name({"MODEL_NAME": ""}), DEFAULT_MODEL_NAME)
+        self.assertEqual(resolve_model_name({"MODEL_NAME": "  "}), DEFAULT_MODEL_NAME)
+        self.assertEqual(
+            resolve_model_name({"MODEL_NAME": "", "GEMINI_MODEL_NAME": "gemini-x"}), DEFAULT_MODEL_NAME
+        )
+
+    def test_reads_process_env_by_default(self):
+        with unittest.mock.patch.dict(os.environ, {"MODEL_NAME": "openai/fake-default"}):
+            self.assertEqual(resolve_model_name(), "openai/fake-default")
+
+
+class TestDefaultModelSingleSource(unittest.TestCase):
+    """DEFAULT_MODEL_NAME lives in config.py only; repo-level files must not re-spell it.
+
+    Two checks read repo-root files (docker-compose.yml, env.example.d/10-llm.env). CI and
+    a normal checkout always have them; they skip only when agent/ is tested
+    on its own (e.g. copied out of the monorepo).
+    """
+
+    def _read(self, relpath: str) -> str:
+        path = os.path.join(_REPO_ROOT, relpath)
+        if not os.path.exists(path):
+            self.skipTest(f"{relpath} not available (not a repo checkout)")
+        with open(path, encoding="utf-8") as f:
+            return f.read()
+
+    def test_compose_does_not_repeat_the_default(self):
+        compose = self._read("docker-compose.yml")
+        # Positive form: the agent's MODEL_NAME entry must be the bare
+        # pass-through. Any `MODEL_NAME=...` / `MODEL_NAME: ...` spelling
+        # (whatever the default syntax or model) reintroduces a second default.
+        self.assertRegex(compose, r"(?m)^\s*-\s*MODEL_NAME\s*$")
+        self.assertNotRegex(compose, r"(?m)^\s*-?\s*MODEL_NAME\s*[=:]")
+        self.assertNotIn(DEFAULT_MODEL_NAME, compose)
+
+    def test_env_example_sample_matches_the_default(self):
+        """env.example.d/10-llm.env is the one human-facing place that names the default."""
+        match = re.search(r"^MODEL_NAME=(\S+)", self._read("env.example.d/10-llm.env"), re.MULTILINE)
+        self.assertIsNotNone(match, "env.example.d/10-llm.env should carry a MODEL_NAME sample line")
+        self.assertEqual(match.group(1), DEFAULT_MODEL_NAME)
+
+    def test_no_other_module_spells_the_default(self):
+        pkg = os.path.dirname(os.path.abspath(config_module.__file__))
+        offenders, scanned = [], 0
+        for root, _dirs, files in os.walk(pkg):
+            for name in files:
+                if not name.endswith(".py") or name == "config.py":
+                    continue
+                scanned += 1
+                path = os.path.join(root, name)
+                with open(path, encoding="utf-8") as f:
+                    if DEFAULT_MODEL_NAME in f.read():
+                        offenders.append(os.path.relpath(path, pkg))
+        self.assertGreater(scanned, 5, f"expected to scan the dak_agent package, got {pkg}")
+        self.assertEqual(offenders, [], "import DEFAULT_MODEL_NAME from dak_agent.config instead")
+
+
+class TestNoDeadLocalLlmEnvVars(unittest.TestCase):
+    """LOCAL_LLM_BASE_URL / LOCAL_LLM_API_KEY were documented but never read.
+
+    The local LLM path is MODEL_NAME=ollama_chat/... plus OLLAMA_API_BASE, so
+    the dead pair must not come back into the files users copy settings from.
+    """
+
+    def test_local_llm_base_url_not_present(self):
+        if not os.path.isdir(os.path.join(_REPO_ROOT, "env.example.d")):
+            self.skipTest("env.example.d/ not available (not a repo checkout)")
+        sections = sorted(glob.glob(os.path.join(_REPO_ROOT, "env.example.d", "*.env")))
+        self.assertTrue(sections, "env.example.d/ should hold the .env template sections")
+        relpaths = ["docker-compose.yml", *(os.path.relpath(p, _REPO_ROOT) for p in sections), "README.md"]
+        for relpath in relpaths:
+            path = os.path.join(_REPO_ROOT, relpath)
+            if not os.path.exists(path):
+                self.skipTest(f"{relpath} not available (not a repo checkout)")
+            with open(path, encoding="utf-8") as f:
+                text = f.read()
+            for name in ("LOCAL_LLM_BASE_URL", "LOCAL_LLM_API_KEY"):
+                self.assertNotIn(name, text, f"{relpath} still mentions the unused {name}")
+
+
+class TestSkillsDirsFromEnv(unittest.TestCase):
+    def test_skills_dirs_from_env(self):
+        self.assertEqual(skills_dirs_from_env({"AGENT_SKILLS_DIRS": "/app/skills: /app/provider_skills:"}),
+                         ["/app/skills", "/app/provider_skills"])
+        default = os.path.join(_REPO_ROOT, "agent", "skills")
+        self.assertEqual(skills_dirs_from_env({}), [default])
+        self.assertEqual(skills_dirs_from_env({"AGENT_SKILLS_DIRS": " "}), [default])
+
+
+if __name__ == "__main__":
+    unittest.main()

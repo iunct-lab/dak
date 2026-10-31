@@ -1,0 +1,59 @@
+# Real-LLM smoke verification using Ollama running natively on the HOST.
+#
+# On macOS, Ollama inside a container gets no GPU (colima/VM is CPU-only),
+# so the agents connect to the host's Metal-accelerated Ollama instead.
+#
+# Default model is llama3.1:8b: it reliably emits *structured* tool calls even
+# when the agent presents many tools at once, and it has no "thinking" phase so
+# every turn stays well under the 120s per-turn client timeout. Verified models:
+#   llama3.1:8b   all 4 smoke tests pass (~2m43s)            <- default
+#   qwen3:8b      tool-calling works, but its <think> blocks push some turns
+#                 past the 120s timeout on a 16GB M4 (skill-discovery times out)
+#   qwen3.5 4b/9b emit tool calls as raw JSON *text* under a multi-tool prompt,
+#                 which breaks the ReAct loop regardless of size — unusable
+#
+# Usage (layer on top of the integration stack):
+#   ollama pull llama3.1:8b   # once, ~4.9GB
+#   COMPOSE_FILE=$(./scripts/compose_files.sh test):docker-compose.local-llm.yml \
+#     docker compose up -d --wait
+#   cd tests/integration && DAK_SMOKE_REAL_LLM=1 uv run pytest test_smoke_real_llm.py
+#
+# Or simply: ./scripts/smoke_local_llm.sh
+#
+# Override the model with LOCAL_MODEL_NAME (LiteLLM format), e.g.
+#   LOCAL_MODEL_NAME=ollama_chat/mistral-nemo
+# Give the Meta-Agent (mode switching) its own model with LOCAL_SMALL_MODEL_NAME,
+# passed as DAK_SMALL_MODEL; unset = the main model. e.g.
+#   LOCAL_SMALL_MODEL_NAME=ollama_chat/qwen3:1.7b
+
+services:
+  agent:
+    environment:
+      - MODEL_NAME=${LOCAL_MODEL_NAME:-ollama_chat/llama3.1:8b}
+      - OLLAMA_API_BASE=http://host.docker.internal:11434
+      - DAK_HARNESS_PROFILE=${DAK_HARNESS_PROFILE:-}
+      - DAK_SMALL_MODEL=${LOCAL_SMALL_MODEL_NAME:-}
+    # host.docker.internal は Docker Desktop (macOS/Windows) でしか自動解決されない。
+    # 素の Linux Docker Engine（GitHub Actions ランナー等）では host-gateway の
+    # 明示が必要。これが無いと agent が Ollama に到達できず /run が即 500 になる
+    # （nightly-eval が発足以来 pass_rate 0.0 だった根本原因）。macOS では無害。
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+
+  agent-enforcer:
+    environment:
+      - MODEL_NAME=${LOCAL_MODEL_NAME:-ollama_chat/llama3.1:8b}
+      - OLLAMA_API_BASE=http://host.docker.internal:11434
+      - DAK_HARNESS_PROFILE=${DAK_HARNESS_PROFILE:-}
+      - DAK_SMALL_MODEL=${LOCAL_SMALL_MODEL_NAME:-}
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+
+  agent-ap2:
+    environment:
+      - MODEL_NAME=${LOCAL_MODEL_NAME:-ollama_chat/llama3.1:8b}
+      - OLLAMA_API_BASE=http://host.docker.internal:11434
+      - DAK_HARNESS_PROFILE=${DAK_HARNESS_PROFILE:-}
+      - DAK_SMALL_MODEL=${LOCAL_SMALL_MODEL_NAME:-}
+    extra_hosts:
+      - "host.docker.internal:host-gateway"

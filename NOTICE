@@ -1,0 +1,25 @@
+Decentralized-Agent-Kit
+Licensed under the Apache License, Version 2.0 (see LICENSE).
+
+This product includes or is derived from the following third-party material.
+
+1. Docker / Moby default seccomp profile (modified)
+   File: mcp-server/seccomp-srt.json
+   Source: https://github.com/moby/profiles (seccomp/default.json, commit 6fe7deb1b9fb)
+   License: Apache License, Version 2.0
+   Modifications: the rule that makes `clone3` fail with ENOSYS without CAP_SYS_ADMIN is removed, and a rule
+   is added that allows 13 namespace and mount syscalls without CAP_SYS_ADMIN
+   (details: docs/design/command-sandbox.md, mcp-server/README.md).
+
+2. htmx 1.9.10 (unmodified, minified)
+   File: bff/static/htmx.min.js (license text: bff/static/htmx.LICENSE)
+   Source: https://github.com/bigskysoftware/htmx
+   License: BSD 2-Clause
+
+3. Short code excerpts and specification examples quoted with their source
+   - docs/comparison/harness-survey-2026-09/: excerpts of 3 to 11 lines each from Apache-2.0 / MIT projects
+     (OpenAI Codex CLI, Gemini CLI, Goose, OpenCode, Pi, Deep Agents, OpenHands agent-sdk, mini-SWE-agent,
+     Hermes Agent, Forge, Cline, Anthropic sandbox-runtime), cited with file paths; the README of that
+     directory lists the projects and their licenses. Crush (FSL-1.1-MIT) is not used.
+   - agent/tests/test_x402_prototype.py: example payloads taken from the public x402 specification
+     (https://github.com/coinbase/x402, specs/transports-v2/http.md and specs/x402-specification-v1.md).

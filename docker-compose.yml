@@ -1,0 +1,79 @@
+services:
+  agent:
+    build: ./agent
+    ports:
+      - "127.0.0.1:8000:8000"
+    env_file:
+      - .env
+    environment:
+      - PYTHONUNBUFFERED=1
+      - DATABASE_URL=postgresql://username:${POSTGRES_PASSWORD}@postgres:5432/postgres
+      - SESSION_SERVICE_URI=postgresql+asyncpg://username:${POSTGRES_PASSWORD}@postgres:5432/postgres
+      - MCP_SERVER_URL=http://mcp-server:8000/mcp
+      # Bare pass-through: host shell value, else .env (env_file), else unset.
+      # Unset resolves to DEFAULT_MODEL_NAME in agent/dak_agent/config.py.
+      # No default is repeated here on purpose (guarded by
+      # agent/tests/test_config.py).
+      - MODEL_NAME
+      - OPENAI_API_KEY=${OPENAI_API_KEY}
+      - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY}
+      - GEMINI_API_KEY=${GOOGLE_API_KEY}
+      - GOOGLE_API_KEY=${GOOGLE_API_KEY}
+      - OLLAMA_API_BASE=http://ollama:11434
+      # Per-feature pass-through: compose/base/<feature>.yml (scripts/compose_files.sh adds it)
+    depends_on:
+      - postgres
+    volumes:
+      - ./agent/agent_config.yaml:/app/agent_config.yaml
+      - ./agent/agent_config.d:/app/agent_config.d
+
+  mcp-server:
+    build: ./mcp-server
+    ports:
+      # Same machine only: run_command and file tools have no auth. To reach it
+      # from the LAN, see docs/getting-started/docker_deployment.md
+      - "127.0.0.1:8001:8000" # host 8001 -> container 8000
+    env_file:
+      - .env
+    environment:
+      - AGENT_URL=http://agent:8000
+      - UVICORN_HOST=0.0.0.0
+    volumes:
+      - .:/projects
+    depends_on:
+      - agent
+
+  bff:
+    build: ./bff
+    ports:
+      - "127.0.0.1:8002:8000"
+    environment:
+      - AGENT_URL=http://agent:8000
+    depends_on:
+      - agent
+
+  postgres:
+    image: postgres:15-alpine
+    environment:
+      - POSTGRES_USER=username
+      - 'POSTGRES_PASSWORD=${POSTGRES_PASSWORD:?POSTGRES_PASSWORD is not set in .env. Generate one with: openssl rand -hex 32}'
+      - POSTGRES_DB=postgres
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    ports:
+      # Same machine only. To reach it from the LAN, see
+      # docs/getting-started/docker_deployment.md
+      - "127.0.0.1:5432:5432"
+
+  # Optional local LLM provider. Start with: docker compose --profile local-llm up
+  ollama:
+    image: ollama/ollama:0.40.8
+    profiles: ["local-llm"]
+    ports:
+      - "127.0.0.1:11434:11434"
+    volumes:
+      - ollama_data:/root/.ollama
+
+volumes:
+  postgres_data:
+  ollama_data:

@@ -1,0 +1,14 @@
+[
+  {
+    "package": "fastapi",
+    "from": "0.141.0",
+    "to": "0.142.0",
+    "changelog": "fastapi 0.142.0 — summary of the release notes (written for this fixture, not a copy)\n\nFeatures:\n- Native OpenTelemetry support: the app can emit traces for requests without a separate instrumentation package.\n\nOther:\n- Documentation site layout changes (no library changes).\n"
+  },
+  {
+    "package": "mcp",
+    "from": "2.1.0",
+    "to": "2.2.0",
+    "changelog": "mcp (Python SDK) 2.2.0 — summary of the release notes (written for this fixture, not a copy)\n\nBehaviour changes:\n- HTTP clients (the Streamable HTTP and SSE clients) follow a redirect only when it stays on the same origin (or upgrades http to https on the same host); a cross-origin redirect fails the call. The follow_redirects setting of a caller-provided HTTP client is no longer used for MCP requests.\n- Stateful Streamable HTTP sessions idle for 30 minutes are closed by the server, and a server keeps at most 10,000 sessions; both limits can be turned off with session_idle_timeout=None and max_sessions=None.\n- The OAuth client checks the authorization server metadata issuer on the legacy discovery path as well; a 403 that is not an insufficient_scope challenge is returned instead of retried.\n- Two new deprecation warnings: pre-provisioned OAuth client providers created without issuer=, and AuthSettings with resource_server_url but no validate_token_resource (3.0 will default it to True).\n\nNew:\n- AuthSettings.validate_token_resource to accept only tokens issued for this server.\n- issuer= on the client-credentials and private-key-JWT OAuth providers.\n- session_idle_timeout= and max_sessions= on the Streamable HTTP server entry points.\n\nFixes:\n- A client DELETE frees its session immediately.\n- $ref in a tool's outputSchema resolves only within that schema.\n"
+  }
+]

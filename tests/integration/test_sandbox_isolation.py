@@ -1,0 +1,150 @@
+"""SANDBOX_MODE=docker on a real Docker daemon (PBI #20, docs/design/session-sandbox.md).
+
+Runs only with DAK_SANDBOX_DOCKER_TESTS=1, against the stack started with the
+opt-in socket override (and a short TTL for the reaper test):
+
+    export SANDBOX_TTL_SECONDS=5     # read by the stack and by these tests
+    COMPOSE_FILE=$(./scripts/compose_files.sh test):docker-compose.sandbox.yml \
+        docker compose up -d --build --wait
+    cd tests/integration && DAK_SANDBOX_DOCKER_TESTS=1 uv run pytest test_sandbox_isolation.py -q
+
+With SANDBOX_RUNTIME set (e.g. runsc), export it for both the stack and these tests.
+
+The test process needs the same daemon (it runs `docker inspect` / `docker ps`).
+"""
+import hashlib
+import json
+import os
+import subprocess
+import time
+import uuid
+
+import httpx
+import pytest
+
+from test_mcp_server import _initialize, _mcp_request, _parse_mcp_body
+
+pytestmark = pytest.mark.skipif(
+    os.getenv("DAK_SANDBOX_DOCKER_TESTS") != "1",
+    reason="Run only on a stack where mounting the Docker socket is approved (#20): set DAK_SANDBOX_DOCKER_TESTS=1",
+)
+
+TTL_SECONDS = int(os.getenv("SANDBOX_TTL_SECONDS", "900"))
+
+
+def _call(session_key: str, tool: str, args: dict) -> str:
+    """Call one tool as the agent would for this session (X-DAK-Session-Key, #19)."""
+    with httpx.Client() as client:
+        headers = _initialize(client)
+        headers["X-DAK-Session-Key"] = session_key
+        resp = _mcp_request(client, headers, {
+            "jsonrpc": "2.0", "id": 1, "method": "tools/call",
+            "params": {"name": tool, "arguments": args},
+        })
+    return _parse_mcp_body(resp)["result"]["content"][0]["text"]
+
+
+def _key() -> str:
+    return f"it-user:{uuid.uuid4()}"
+
+
+def _container(session_key: str) -> str:
+    return "dak-sandbox-" + hashlib.sha256(session_key.encode()).hexdigest()[:16]
+
+
+def _docker_memory_bytes(size: str) -> int:
+    """What docker makes of a --memory value, read from a container created with it and never started."""
+    image = os.getenv("SANDBOX_IMAGE", "python:3.12-slim")
+    cid = subprocess.run(["docker", "create", "--memory", size, image, "true"],
+                         check=True, capture_output=True, text=True).stdout.strip()
+    try:
+        inspected = subprocess.run(["docker", "inspect", cid], check=True, capture_output=True, text=True)
+        return json.loads(inspected.stdout)[0]["HostConfig"]["Memory"]
+    finally:
+        subprocess.run(["docker", "rm", cid], capture_output=True)
+
+
+def _sandbox_containers() -> set[str]:
+    out = subprocess.run(["docker", "ps", "-a", "--filter", "label=dak.sandbox=1", "--format", "{{.Names}}"],
+                         check=True, capture_output=True, text=True).stdout
+    return set(out.split())
+
+
+def test_two_sessions_cannot_see_each_others_files():
+    a, b = _key(), _key()
+    # Each session writes its own files, through run_command and through a file tool.
+    for key, name in ((a, "a"), (b, "b")):
+        _call(key, "run_command", {"command": f"echo {name} > {name}.txt"})
+        _call(key, "write_file", {"path": f"notes/{name}.txt", "content": f"from {name}"})
+        assert f"{name}.txt" in _call(key, "run_command", {"command": "ls"})
+        assert _call(key, "read_file", {"path": f"notes/{name}.txt"}) == f"from {name}"
+
+    # Neither sees the other's, in either direction.
+    for key, other in ((a, "b"), (b, "a")):
+        assert f"{other}.txt" not in _call(key, "run_command", {"command": "ls -A . notes"})
+        assert f"{other}.txt" not in _call(key, "list_files", {"path": "notes"})
+        assert "No such file" in _call(key, "read_file", {"path": f"notes/{other}.txt"})
+        assert _call(key, "grep", {"pattern": f"from {other}", "path": "."}) == "No matches found."
+
+
+def test_network_is_blocked_in_sandbox():
+    probe = ("python3 -c \"import urllib.request; urllib.request.urlopen('https://example.com', timeout=5)\""
+             " && echo REACHED || echo BLOCKED")
+    out = _call(_key(), "run_command", {"command": probe})
+    assert "BLOCKED" in out and "REACHED" not in out
+
+
+def test_resource_limits_are_applied():
+    key = _key()
+    # What the kernel enforces in the container's cgroup: CPU quota (per 100 ms), memory and PID limits.
+    # cgroup v2 has cpu.max / memory.max / pids.max at the root; v1 has one directory per controller.
+    read_cgroup = ("if [ -f /sys/fs/cgroup/cpu.max ]; then cut -d' ' -f1 /sys/fs/cgroup/cpu.max;"
+                   " cat /sys/fs/cgroup/memory.max /sys/fs/cgroup/pids.max;"
+                   " else cat /sys/fs/cgroup/cpu/cpu.cfs_quota_us /sys/fs/cgroup/memory/memory.limit_in_bytes"
+                   " /sys/fs/cgroup/pids/pids.max; fi")
+    cgroup = _call(key, "run_command", {"command": read_cgroup})
+    print(f"cgroup inside the sandbox: {cgroup}")
+    inspected = subprocess.run(["docker", "inspect", _container(key)], check=True, capture_output=True, text=True)
+    host_config = json.loads(inspected.stdout)[0]["HostConfig"]
+    cpus = float(os.getenv("SANDBOX_CPUS", "1"))
+    pids = int(os.getenv("SANDBOX_PIDS_LIMIT", "128"))
+
+    assert host_config["NanoCpus"] == int(cpus * 1e9)
+    assert host_config["Memory"] == _docker_memory_bytes(os.getenv("SANDBOX_MEMORY", "512m"))
+    assert host_config["PidsLimit"] == pids
+    assert host_config["NetworkMode"] == "none"
+    assert host_config["ReadonlyRootfs"] is True
+    assert host_config["CapDrop"] == ["ALL"]
+    # Enforced, not only configured: the values reach the container's cgroup.
+    quota, limit, pids_max = cgroup.split("Stdout:\n", 1)[1].split()[:3]
+    assert (quota, limit) == (str(int(cpus * 100000)), str(host_config["Memory"])), cgroup
+    # gVisor's cgroupfs inside the sandbox shows pids.max as "max": the limit is on the host side of the
+    # sandbox (docs/design/execution-isolation-options.md, section 4, #565). PidsLimit above still holds.
+    if not os.getenv("SANDBOX_RUNTIME"):
+        assert pids_max == str(pids), cgroup
+
+
+@pytest.mark.skipif(TTL_SECONDS > 10, reason="needs the stack started with SANDBOX_TTL_SECONDS<=10")
+def test_session_destroyed_after_ttl():
+    key = _key()
+    _call(key, "run_command", {"command": "true"})
+    assert _container(key) in _sandbox_containers()
+    deadline = time.time() + 70
+    while time.time() < deadline and _container(key) in _sandbox_containers():
+        time.sleep(2)
+    assert _container(key) not in _sandbox_containers()
+
+
+def test_container_uses_the_configured_runtime():
+    runtime = os.getenv("SANDBOX_RUNTIME", "")
+    if not runtime:
+        pytest.skip("SANDBOX_RUNTIME is empty: the containers use Docker's default runtime")
+    key = _key()
+    _call(key, "run_command", {"command": "true"})
+    inspected = subprocess.run(["docker", "inspect", _container(key)], check=True, capture_output=True, text=True)
+    host_config = json.loads(inspected.stdout)[0]["HostConfig"]
+    pids = int(os.getenv("SANDBOX_PIDS_LIMIT", "128"))
+
+    assert host_config["Runtime"] == runtime
+    # runsc does not count guest threads against --pids-limit, so a set runtime also gets RLIMIT_NPROC (#565).
+    assert {"Name": "nproc", "Soft": pids, "Hard": pids} in (host_config["Ulimits"] or [])

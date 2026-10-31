@@ -1,0 +1,7 @@
+name: "dak_peer"
+# the peer's A2A endpoint; its card is under it. ADK fetches cards over https or
+# plain http on a loopback name only (agent-peer.localhost: compose/test/a2a.yml)
+url: "http://agent-peer.localhost:8000/a2a/dak_agent"
+capabilities: ["delegation test"]
+# agent-peer signs its card with the key card-keygen makes (compose/test/a2a.yml)
+card_public_key_file: "/keys/card-signing.pub.pem"

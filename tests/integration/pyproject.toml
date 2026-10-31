@@ -1,0 +1,25 @@
+[project]
+name = "dak-integration-tests"
+version = "0.1.0"
+description = "Docker-based integration tests for the Decentralized Agent Kit"
+license = "Apache-2.0"
+requires-python = ">=3.11"
+dependencies = []
+
+[dependency-groups]
+dev = [
+    "pytest>=9.1.1",
+    "httpx>=0.28.1",
+    "playwright>=1.61.0",
+    "agent-client-protocol>=0.12.1,<0.13",
+    "a2a-sdk>=1.1,<2",
+]
+# The real-LLM smoke's direct call (test_smoke_real_llm.py); scripts/smoke_common.sh installs it
+smoke = [
+    "litellm>=1.104.0",
+    "boto3>=1.43.98",
+]
+
+[tool.pytest.ini_options]
+testpaths = ["."]
+addopts = "-ra"

@@ -1,0 +1,83 @@
+services:
+  # 1. Consumer Agent (Buyer)
+  agent-consumer:
+    build:
+      context: ./agent
+      dockerfile: Dockerfile
+    environment:
+      - GOOGLE_API_KEY=${GOOGLE_API_KEY}
+      - ENABLE_AP2_PROTOCOL=true
+      - ENABLE_A2A_CONSUMER=true
+      - ENABLE_ENFORCER_MODE=false
+      - SOLANA_USE_MOCK=true
+      - SOLANA_NETWORK=devnet
+      - AGENT_NAME=dak_agent
+      - AGENT_PUBLIC_URL=http://agent-consumer:8000/a2a/dak_agent
+      - SESSION_SERVICE_URI=postgresql+asyncpg://username:${POSTGRES_PASSWORD}@postgres:5432/postgres
+      - 'AGENT_INSTRUCTION=You are a Consumer Agent. Payment Policy: If you receive a PaymentRequired error, you MUST call check_solana_balance(). If you have funds, use send_sol_payment to pay. CRITICAL: AFTER paying, you MUST IMMEDIATELY call the "transfer_to_agent_provider" tool again with the "payment_hash" argument. DO NOT STOP to report the payment to the user. CHAIN THE TOOLS: Pay -> Retry -> Report Result. You have permission to proceed without asking.'
+      - MCP_SERVER_URL=http://mcp-server:8000/mcp
+      - LANGFUSE_SECRET_KEY=${LANGFUSE_SECRET_KEY}
+      - LANGFUSE_PUBLIC_KEY=${LANGFUSE_PUBLIC_KEY}
+      - LANGFUSE_HOST=${LANGFUSE_BASE_URL}
+    depends_on:
+      - mcp-server
+    ports:
+      - "127.0.0.1:8001:8000"
+
+  # 2. Provider Agent (Seller)
+  agent-provider:
+    build:
+      context: ./agent
+      dockerfile: Dockerfile
+    environment:
+      - GOOGLE_API_KEY=${GOOGLE_API_KEY}
+      - ENABLE_AP2_PROTOCOL=true
+      - SOLANA_USE_MOCK=true
+      - AGENT_SKILLS_DIRS=/app/skills:/app/provider_skills
+      - AGENT_NAME=dak_agent
+      - AGENT_PUBLIC_URL=http://agent-provider:8000/a2a/dak_agent
+      - SESSION_SERVICE_URI=postgresql+asyncpg://username:${POSTGRES_PASSWORD}@postgres:5432/postgres
+      - AGENT_INSTRUCTION="You are a Provider Agent. You sell premium analysis. Use 'premium_service' skill."
+      - MCP_SERVER_URL=http://mcp-server:8000/mcp
+    depends_on:
+      - mcp-server
+    ports:
+      - "127.0.0.1:8002:8000"
+
+  # Shared MCP Server (for basic tools)
+  mcp-server:
+    build:
+      context: ./mcp-server
+      dockerfile: Dockerfile
+    environment:
+      - GOOGLE_API_KEY=${GOOGLE_API_KEY}
+    ports:
+      # Same machine only (no auth on run_command); see docker-compose.yml
+      - "127.0.0.1:8000:8000"
+
+  # Database
+  postgres:
+    image: postgres:15
+    environment:
+      POSTGRES_USER: username
+      POSTGRES_PASSWORD: '${POSTGRES_PASSWORD:?POSTGRES_PASSWORD is not set in .env. Generate one with: openssl rand -hex 32}'
+      POSTGRES_DB: postgres
+    ports:
+      - "127.0.0.1:5432:5432"
+    healthcheck:
+      test: [ "CMD-SHELL", "pg_isready -U username -d postgres" ]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  # UI (Consumer Agent Interface)
+  bff:
+    build:
+      context: ./bff
+      dockerfile: Dockerfile
+    ports:
+      - "127.0.0.1:3000:8000"
+    environment:
+      - AGENT_URL=http://agent-consumer:8000
+    depends_on:
+      - agent-consumer

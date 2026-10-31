@@ -1,0 +1,13 @@
+{
+  "name": "skill_enable_read",
+  "prompt": "Enable the filesystem skill and read README.md",
+  "model": "fake-default",
+  "script": [
+    {"tool_call": {"name": "enable_skill", "args": {"skill_name": "filesystem"}}},
+    {"tool_call": {"name": "read_file", "args": {"path": "README.md"}}},
+    {"text": "The README was read successfully."}
+  ],
+  "expect": {
+    "function_calls": ["enable_skill", "read_file"]
+  }
+}

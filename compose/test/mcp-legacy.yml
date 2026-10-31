@@ -1,0 +1,27 @@
+services:
+  # tests/integration/test_mcp_modern_client.py (#325): an agent on the pre-2026 MCP
+  # session (ADK's MCP_MODERN_PROTOCOL off; agent/Dockerfile turns it on) and a
+  # 2026-07-28 client use the same mcp-server at once.
+  agent-legacy-mcp:
+    build: ./agent
+    ports:
+      - "127.0.0.1:8019:8000"
+    environment:
+      - PYTHONUNBUFFERED=1
+      - DATABASE_URL=postgresql://username:${POSTGRES_PASSWORD}@postgres:5432/postgres
+      - SESSION_SERVICE_URI=postgresql+asyncpg://username:${POSTGRES_PASSWORD}@postgres:5432/postgres
+      - MCP_SERVER_URL=http://mcp-server:8000/mcp
+      - MODEL_NAME=openai/fake-legacy-mcp
+      - OPENAI_API_BASE=http://fake-llm:8080/v1
+      - OPENAI_API_KEY=dummy
+      - ADK_ENABLE_MCP_MODERN_PROTOCOL=0
+    depends_on:
+      postgres: {condition: service_started}
+      fake-llm: {condition: service_started}
+      mcp-server: {condition: service_started}
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/list-apps')"]
+      interval: 5s
+      timeout: 10s
+      retries: 30
+      start_period: 20s

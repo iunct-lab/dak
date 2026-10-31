@@ -1,0 +1,134 @@
+"""Runtime patches and telemetry setup applied once at agent startup."""
+import functools
+import logging
+import os
+
+logger = logging.getLogger(__name__)
+# The `MCP connected` line has its own logger: uvicorn configures only its own
+# loggers, so like `tool_call` in permission.py it goes to stderr on its own,
+# and only once (not again through a root handler an entrypoint may configure).
+negotiation_logger = logging.getLogger(f"{__name__}.mcp_negotiation")
+if not negotiation_logger.handlers:
+    negotiation_logger.addHandler(logging.StreamHandler())
+    negotiation_logger.setLevel(logging.INFO)
+    negotiation_logger.propagate = False
+
+
+def apply_patches() -> None:
+    """Monkey-patch mcp.ClientSession so Pydantic can generate schemas for it,
+    and so every MCP connection logs what it negotiated (`log_mcp_negotiation`)."""
+    try:
+        from mcp.client.session import ClientSession
+        from pydantic import GetCoreSchemaHandler
+        from pydantic_core import CoreSchema, core_schema
+
+        def _get_pydantic_core_schema(cls, source_type, handler: GetCoreSchemaHandler) -> CoreSchema:
+            return core_schema.is_instance_schema(source_type)
+
+        ClientSession.__get_pydantic_core_schema__ = classmethod(_get_pydantic_core_schema)
+        logger.info("Monkey-patched ClientSession for Pydantic compatibility.")
+
+        # Both `initialize` and `server/discover` end in `adopt` once the
+        # server has answered. Wrapped once, however often this runs.
+        original_adopt = ClientSession.adopt
+        if not getattr(original_adopt, "_dak_logs_negotiation", False):
+
+            @functools.wraps(original_adopt)
+            def _adopt_and_log(self, result):
+                original_adopt(self, result)
+                try:
+                    log_mcp_negotiation(self)
+                except Exception as e:  # a log line must never fail the connection
+                    logger.warning(f"Could not log the MCP negotiation: {type(e).__name__}")
+
+            _adopt_and_log._dak_logs_negotiation = True
+            ClientSession.adopt = _adopt_and_log
+    except ImportError:
+        logger.warning("Could not monkey-patch ClientSession (mcp not installed?)")
+    except Exception as e:
+        logger.warning(f"Failed to monkey-patch ClientSession: {e}")
+
+
+def log_mcp_negotiation(session) -> None:
+    """Log what an MCP connection negotiated, as one INFO line (#672).
+
+    Reads only the session's public `protocol_version`, `server_info` and
+    `server_capabilities`, so no header, URL or credential reaches the log."""
+    info = session.server_info
+    server = f"{_one_line(info.name)}/{_one_line(info.version)}" if info else "unknown"
+    caps = session.server_capabilities
+    names = ",".join(sorted(_one_line(k) for k in caps.model_dump(exclude_none=True))) if caps else ""
+    negotiation_logger.info(f"MCP connected: protocol={_one_line(session.protocol_version)} server={server} capabilities={names or 'none'}")
+
+
+def _one_line(value) -> str:
+    """Escape control characters in a server-supplied value, so it cannot start a forged log line."""
+    return "".join(c if c.isprintable() else c.encode("unicode_escape").decode() for c in str(value))
+
+
+def ensure_tracer_provider() -> None:
+    """Give spans real IDs without LangFuse: an SDK TracerProvider with no exporter.
+
+    The mcp SDK puts the current trace context in each request's `_meta.traceparent`
+    (SEP-414); with OpenTelemetry's default proxy provider every ID is 0. A provider
+    LangFuse already set is kept. The OTLP provider goes first: the global provider
+    can be set once, and the server calls this before the agent module is loaded."""
+    from opentelemetry import trace
+    from opentelemetry.sdk.trace import TracerProvider
+
+    try:
+        _install_otlp_provider()
+    except Exception as e:
+        logger.warning(f"[OTel] Skipping OTLP export: {type(e).__name__} - {e}")
+    if not isinstance(trace.get_tracer_provider(), TracerProvider):
+        trace.set_tracer_provider(TracerProvider())
+
+
+def _langfuse_configured() -> bool:
+    return bool(os.getenv("LANGFUSE_PUBLIC_KEY") and os.getenv("LANGFUSE_SECRET_KEY"))
+
+
+def _install_otlp_provider() -> None:
+    """Attach the OTLP exporter configured by the standard OTEL_EXPORTER_OTLP_* variables.
+
+    Done before anything else sets the global TracerProvider (it can be set once),
+    so LangFuse and ensure_tracer_provider() join this provider instead of replacing
+    it. Without an endpoint nothing is installed. A provider that is already set
+    (get_fast_api_app) is kept."""
+    from opentelemetry import trace
+
+    if isinstance(trace.get_tracer_provider(), trace.ProxyTracerProvider):
+        from google.adk.telemetry.setup import maybe_set_otel_providers
+
+        maybe_set_otel_providers()
+
+
+def setup_telemetry() -> None:
+    """Export spans over OTLP if configured; instrument google-adk for LangFuse if its keys are set."""
+    try:
+        _install_otlp_provider()
+    except Exception as e:
+        logger.warning(f"[OTel] Skipping OTLP export: {type(e).__name__} - {e}")
+    if not _langfuse_configured():
+        # ADK's own spans carry prompts, replies and tool arguments unless told not to;
+        # without LangFuse nothing needs them, and the OTel GenAI conventions make them opt-in.
+        os.environ.setdefault("ADK_CAPTURE_MESSAGE_CONTENT_IN_SPANS", "false")
+    else:
+        try:
+            from openinference.instrumentation.google_adk import GoogleADKInstrumentor
+            from langfuse import get_client
+
+            GoogleADKInstrumentor().instrument()
+            logger.info("[Langfuse] Instrumentation initialized.")
+
+            try:
+                langfuse = get_client()
+                if langfuse.auth_check():
+                    logger.info("[Langfuse] Authentication successful - monitoring enabled")
+                else:
+                    logger.warning("[Langfuse] Authentication failed - check your credentials")
+            except Exception as e:
+                logger.warning(f"[Langfuse] Connection error: {e}")
+        except Exception as e:
+            logger.warning(f"[Langfuse] Skipping instrumentation: {type(e).__name__} - {e}")
+    ensure_tracer_provider()

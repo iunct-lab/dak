@@ -1,0 +1,163 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>DAK Agent - HTMX</title>
+    <script src="/static/htmx.min.js"></script>
+    <style>
+        body {
+            font-family: sans-serif;
+            background: #1a1a1a;
+            color: #fff;
+            margin: 0;
+            display: flex;
+            flex-direction: column;
+            height: 100vh;
+        }
+
+        .container {
+            max-width: 800px;
+            margin: 0 auto;
+            padding: 20px;
+            flex: 1;
+            display: flex;
+            flex-direction: column;
+        }
+
+        #chat-history {
+            flex: 1;
+            overflow-y: auto;
+            display: flex;
+            flex-direction: column;
+            gap: 10px;
+            padding-bottom: 20px;
+        }
+
+        .chat-message {
+            padding: 10px 15px;
+            border-radius: 10px;
+            max-width: 80%;
+        }
+
+        .chat-message.user {
+            align-self: flex-end;
+            background: #2563eb;
+        }
+
+        .chat-message.assistant {
+            align-self: flex-start;
+            background: #374151;
+        }
+
+        .chat-message.system {
+            align-self: center;
+            font-style: italic;
+            color: #9ca3af;
+        }
+
+        .chat-message.error {
+            align-self: center;
+            background: #ef4444;
+        }
+
+        form {
+            display: flex;
+            gap: 10px;
+            padding-top: 20px;
+            border-top: 1px solid #374151;
+        }
+
+        input[type="text"] {
+            flex: 1;
+            padding: 10px;
+            border-radius: 5px;
+            border: 1px solid #374151;
+            background: #1f2937;
+            color: #fff;
+        }
+
+        button {
+            padding: 10px 20px;
+            background: #2563eb;
+            color: #fff;
+            border: none;
+            border-radius: 5px;
+            cursor: pointer;
+        }
+
+        button:hover {
+            background: #1d4ed8;
+        }
+
+        .approval-card form { display:flex; gap:8px; margin-top:8px; }
+        .approval-card button.reject { background:#ef4444; }
+
+        /* New styles for thoughts */
+        .thoughts {
+            margin-bottom: 10px;
+            border: 1px solid #4b5563;
+            border-radius: 5px;
+            padding: 5px;
+            background: #1f2937;
+        }
+
+        .thoughts summary {
+            cursor: pointer;
+            color: #9ca3af;
+            font-size: 0.85em;
+            padding: 5px;
+            user-select: none;
+        }
+
+        .thoughts summary:hover {
+            color: #fff;
+        }
+
+        .thought-content {
+            padding: 5px 10px;
+            border-top: 1px solid #374151;
+            margin-top: 5px;
+        }
+
+        .thought-item {
+            font-size: 0.85em;
+            color: #d1d5db;
+            margin: 5px 0;
+            font-family: monospace;
+            white-space: pre-wrap;
+        }
+
+        .thought-label {
+            color: #60a5fa;
+            font-weight: bold;
+        }
+
+        .message-content {
+            white-space: pre-wrap;
+            line-height: 1.5;
+        }
+    </style>
+</head>
+
+<body>
+    <div class="container">
+        <header>
+            <h1>DAK Agent (HTMX)</h1>
+        </header>
+
+        <div id="chat-history">
+            <!-- Messages will appear here -->
+        </div>
+
+        <form hx-post="/chat" hx-target="#chat-history" hx-swap="beforeend" hx-on::after-request="this.reset()">
+            <input type="hidden" id="session-id-input" name="session_id" value="{{ session_id }}">
+            <input type="hidden" name="user_id" value="{{ user_id }}">
+            <input type="text" name="prompt" placeholder="Type a message..." required autocomplete="off">
+            <button type="submit">Send</button>
+        </form>
+    </div>
+</body>
+
+</html>

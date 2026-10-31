@@ -1,0 +1,19 @@
+# Extra agents used only by tests/integration/test_smoke_real_llm.py.
+# Keep this separate from docker-compose.llamacpp.yml so that the latter is a
+# valid overlay for the normal DAK application (which has only `agent`).
+
+x-llamacpp-test: &llamacpp-test
+  environment:
+    MODEL_NAME: ${LLAMACPP_MODEL_NAME:-openai/llamacpp}
+    OPENAI_API_BASE: ${LLAMACPP_API_BASE:-http://host.docker.internal:18080/v1}
+    OPENAI_API_KEY: ${LLAMACPP_API_KEY:-not-used}
+    MODEL_CONTEXT_WINDOW: ${LLAMACPP_CONTEXT_SIZE:-8192}
+  extra_hosts:
+    - "host.docker.internal:host-gateway"
+
+services:
+  agent-enforcer:
+    <<: *llamacpp-test
+
+  agent-ap2:
+    <<: *llamacpp-test

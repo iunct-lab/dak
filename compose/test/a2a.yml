@@ -1,0 +1,92 @@
+services:
+  # tests/integration/test_a2a.py -k signature: the Agent Card signing key pair,
+  # made when the stack comes up and tests/integration/.keys/ (gitignored) has
+  # none yet, so a fresh checkout or CI gets a new pair. No key is in the repository.
+  # agent and agent-peer sign with it; agent-consumer checks agent-peer's card, and
+  # the tests read the public key on the host to check agent's card.
+  card-keygen:
+    build: ./agent
+    entrypoint: []
+    command: ["uv", "run", "python", "/tools/make_card_keys.py", "/keys"]
+    volumes:
+      - ./tests/integration/tools:/tools:ro
+      - ./tests/integration/.keys:/keys
+
+  agent:
+    environment:
+      - AGENT_CARD_SIGNING_KEY_FILE=/keys/card-signing.pem
+      - AGENT_CARD_SIGNING_KID=test-1
+    volumes:
+      - ./tests/integration/.keys:/keys:ro
+    depends_on:
+      card-keygen: {condition: service_completed_successfully}
+
+  # tests/integration/test_a2a.py -k delegation: one DAK hands a task to another
+  # over A2A. The peer's card is named dak_peer (not dak_agent); the consumer finds
+  # it from the peer's endpoint URL in its a2a_peers, not from a hardcoded name.
+  # ADK's RemoteA2aAgent takes a card (and RPC) URL only over https or plain http
+  # on a loopback name; *.localhost counts, so the peer is reached as agent-peer.localhost.
+  agent-peer:
+    build: ./agent
+    # host port for tests/integration/test_a2a.py: it lists the sessions the consumer's delegations created here
+    ports:
+      - "127.0.0.1:8017:8000"
+    networks:
+      default:
+        aliases:
+          - agent-peer.localhost
+    environment:
+      - PYTHONUNBUFFERED=1
+      - DATABASE_URL=postgresql://username:${POSTGRES_PASSWORD}@postgres:5432/postgres
+      - SESSION_SERVICE_URI=postgresql+asyncpg://username:${POSTGRES_PASSWORD}@postgres:5432/postgres
+      - MCP_SERVER_URL=http://mcp-server:8000/mcp
+      - MODEL_NAME=openai/fake-peer
+      - OPENAI_API_BASE=http://fake-llm:8080/v1
+      - OPENAI_API_KEY=dummy
+      - AGENT_NAME=dak_peer
+      - AGENT_PUBLIC_URL=http://agent-peer.localhost:8000/a2a/dak_agent
+      - AGENT_CARD_SIGNING_KEY_FILE=/keys/card-signing.pem
+      - AGENT_CARD_SIGNING_KID=test-1
+      # its card lists these skills, premium_service included; the consumer reads them (test_a2a.py)
+      - AGENT_SKILLS_DIRS=/app/skills:/app/provider_skills
+    volumes:
+      - ./tests/integration/.keys:/keys:ro
+    depends_on:
+      postgres: {condition: service_started}
+      fake-llm: {condition: service_started}
+      card-keygen: {condition: service_completed_successfully}
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/list-apps')"]
+      interval: 5s
+      timeout: 10s
+      retries: 30
+      start_period: 20s
+
+  agent-consumer:
+    build: ./agent
+    ports:
+      - "127.0.0.1:8013:8000"
+    environment:
+      - PYTHONUNBUFFERED=1
+      - DATABASE_URL=postgresql://username:${POSTGRES_PASSWORD}@postgres:5432/postgres
+      - SESSION_SERVICE_URI=postgresql+asyncpg://username:${POSTGRES_PASSWORD}@postgres:5432/postgres
+      - MCP_SERVER_URL=http://mcp-server:8000/mcp
+      - MODEL_NAME=openai/fake-consumer
+      - OPENAI_API_BASE=http://fake-llm:8080/v1
+      - OPENAI_API_KEY=dummy
+      - ENABLE_A2A_CONSUMER=true
+    volumes:
+      - ./tests/integration/fixtures/agent_config.consumer.yaml:/app/agent_config.yaml
+      - ./tests/integration/fixtures/agent_config.consumer.d:/app/agent_config.d
+      - ./tests/integration/.keys:/keys:ro
+    # The consumer fetches agent-peer's card at startup to check its signature
+    depends_on:
+      postgres: {condition: service_started}
+      fake-llm: {condition: service_started}
+      agent-peer: {condition: service_healthy}
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/list-apps')"]
+      interval: 5s
+      timeout: 10s
+      retries: 30
+      start_period: 20s

@@ -1,0 +1,16 @@
+[
+  "planner",
+  "switch_mode",
+  "write_todos",
+  "read_plan",
+  "read_original_request",
+  "write_handoff",
+  "read_handoff",
+  "plan_exit",
+  "dak_explorer",
+  "read_tool_output",
+  "get_context_remaining",
+  "new_context",
+  "list_skills",
+  "enable_skill"
+]

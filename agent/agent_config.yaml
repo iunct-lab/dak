@@ -1,0 +1,10 @@
+# MCP servers and A2A peers are one file each in agent_config.d/
+# (mcp_servers/<name>.yaml, a2a_peers/<name>.yaml), read after this file.
+
+# Tool permission rules, appended after the defaults in dak_agent/permission.py
+# (the last matching rule wins). source: local | default | caller | <MCP URL>;
+# tool / pattern are globs (pattern matches run_command's command or a path).
+# action: allow | ask | deny.
+permissions: []
+#  - {source: default, tool: run_command, pattern: "pytest *", action: allow}
+#  - {source: caller, tool: write_file, action: ask}

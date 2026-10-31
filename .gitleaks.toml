@@ -1,0 +1,11 @@
+# gitleaks の設定（CI の secrets ジョブと .githooks/pre-commit が使う）。
+# 標準ルールに加え、標準にも GitHub の secret scanning にも無い鍵の形式をここに足す。
+
+[extend]
+useDefault = true
+
+[[rules]]
+id = "langfuse-key"
+description = "Langfuse public/secret key"
+regex = '''\b(?:pk|sk)-lf-[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}\b'''
+keywords = ["pk-lf-", "sk-lf-"]

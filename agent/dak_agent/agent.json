@@ -1,0 +1,25 @@
+{
+    "capabilities": {},
+    "defaultInputModes": [
+        "text/plain"
+    ],
+    "defaultOutputModes": [
+        "text/plain"
+    ],
+    "description": "A helpful assistant powered by the Decentralized Agent Kit.",
+    "name": "dak_agent",
+    "protocolVersion": "0.2.6",
+    "skills": [
+        {
+            "description": "A helpful assistant powered by the Decentralized Agent Kit that can help with various tasks using MCP tools.",
+            "id": "dak_agent",
+            "name": "model",
+            "tags": [
+                "llm"
+            ]
+        }
+    ],
+    "supportsAuthenticatedExtendedCard": false,
+    "url": "http://agent-provider:8000/a2a/dak_agent",
+    "version": "0.1.0"
+}

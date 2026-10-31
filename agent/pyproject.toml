@@ -1,0 +1,53 @@
+[project]
+name = "dak-agent"
+version = "0.1.0"
+description = "Decentralized Agent Kit Agent with A2A and MCP support"
+license = "Apache-2.0"
+readme = "README.md"
+requires-python = ">=3.11,<3.14"
+dependencies = [
+    "google-adk[a2a,db,mcp]>=2.12.0,<3",
+    "mcp>=2.3,<3",
+    "httpx2>=2.13,<3",
+    "asyncpg>=0.30",
+    "fastapi>=0.139.0",
+    "uvicorn>=0.50.0",
+    "pydantic>=2.13.4",
+    "python-dotenv>=1.2.2",
+    "PyYAML>=6.0.1",
+    "psycopg2-binary>=2.9.12",
+    "langfuse>=4.13.0",
+    "openinference-instrumentation>=0.1.54",
+    "openinference-instrumentation-google-adk>=0.1.17",
+    "opentelemetry-sdk>=1.27.0",
+    "opentelemetry-exporter-otlp>=1.27.0",
+    "litellm>=1.91.0",
+    "jsonschema>=4.25,<5",
+    "httpx>=0.28,<1",
+    # Read the host's SecureString at runtime; already part of LiteLLM's lock.
+    "boto3>=1.40",
+    # Solana + AP2/x402 support
+    # 0.40 で同期の solana.rpc.api が消えた（solana_wallet.py と x402 の SVM の署名が使う）ので 0.40 未満
+    "solana>=0.39.0,<0.40",
+    "solders>=0.21.0",
+    # x402 の Solana の exact の支払いの署名。docs/design/x402.md
+    "x402[svm]==2.25.0",
+    # A2A 1.0 のカードを配る。移行の経緯と版の方針は docs/architecture/a2a.md
+    "a2a-sdk>=1.1,<2",
+    # 支払いの意図（SD-JWT）の ES256 の検証。docs/design/verifiable_intent.md
+    "cryptography>=46",
+]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["dak_agent"]
+
+[dependency-groups]
+dev = [
+    "pytest>=9.1.1",
+    "pytest-asyncio>=1.4.0",
+]
+

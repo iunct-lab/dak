@@ -1,0 +1,120 @@
+{
+  "litellm_version": "1.105.0",
+  "mcp_version": "2.3.0",
+  "function": "litellm.proxy._experimental.mcp_server.result_conversion.to_call_tool_result",
+  "inputs": {
+    "text": {
+      "content": [
+        {
+          "type": "text",
+          "text": "README.md\nagent/\nmcp-server/"
+        }
+      ],
+      "isError": false,
+      "resultType": "complete"
+    },
+    "structured": {
+      "content": [
+        {
+          "type": "text",
+          "text": "{\"city\": \"Tokyo\", \"temperature_c\": 18.5, \"conditions\": \"cloudy\"}"
+        }
+      ],
+      "structuredContent": {
+        "city": "Tokyo",
+        "temperature_c": 18.5,
+        "conditions": "cloudy"
+      },
+      "isError": false,
+      "resultType": "complete"
+    },
+    "error": {
+      "content": [
+        {
+          "type": "text",
+          "text": "ファイルが見つかりません: /workspace/missing.txt"
+        }
+      ],
+      "isError": true,
+      "resultType": "complete"
+    }
+  },
+  "outputs": {
+    "text": {
+      "legacy": {
+        "content": [
+          {
+            "type": "text",
+            "text": "README.md\nagent/\nmcp-server/"
+          }
+        ],
+        "isError": false,
+        "resultType": "complete"
+      },
+      "modern": {
+        "content": [
+          {
+            "type": "text",
+            "text": "README.md\nagent/\nmcp-server/"
+          }
+        ],
+        "isError": false,
+        "resultType": "complete"
+      }
+    },
+    "structured": {
+      "legacy": {
+        "content": [
+          {
+            "type": "text",
+            "text": "{\"city\": \"Tokyo\", \"temperature_c\": 18.5, \"conditions\": \"cloudy\"}"
+          }
+        ],
+        "structuredContent": {
+          "city": "Tokyo",
+          "temperature_c": 18.5,
+          "conditions": "cloudy"
+        },
+        "isError": false,
+        "resultType": "complete"
+      },
+      "modern": {
+        "content": [
+          {
+            "type": "text",
+            "text": "{\"city\": \"Tokyo\", \"temperature_c\": 18.5, \"conditions\": \"cloudy\"}"
+          }
+        ],
+        "structuredContent": {
+          "city": "Tokyo",
+          "temperature_c": 18.5,
+          "conditions": "cloudy"
+        },
+        "isError": false,
+        "resultType": "complete"
+      }
+    },
+    "error": {
+      "legacy": {
+        "content": [
+          {
+            "type": "text",
+            "text": "ファイルが見つかりません: /workspace/missing.txt"
+          }
+        ],
+        "isError": true,
+        "resultType": "complete"
+      },
+      "modern": {
+        "content": [
+          {
+            "type": "text",
+            "text": "ファイルが見つかりません: /workspace/missing.txt"
+          }
+        ],
+        "isError": true,
+        "resultType": "complete"
+      }
+    }
+  }
+}

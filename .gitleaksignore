@@ -1,0 +1,4 @@
+# 履歴に残る失効済みの鍵だけを除外する（新しい検出をここに足して黙らせない。鍵は失効させる）。
+# Langfuse の旧鍵。2026-09-23 に失効を確認した（#286）
+dcf1203df22ab06f4ae072540e9fd1d2e77c7d63:analyze_langfuse.py:langfuse-key:7
+dcf1203df22ab06f4ae072540e9fd1d2e77c7d63:analyze_langfuse.py:langfuse-key:8

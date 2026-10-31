@@ -1,0 +1,9 @@
+# Web search: the agent's environment (scripts/compose_files.sh adds this file).
+
+services:
+  agent:
+    environment:
+      # Web search (optional) — see docs/getting-started/web-search.md. Bare
+      # pass-through: an unset key stays unset and the skill stays off.
+      - TAVILY_API_KEY
+      - TAVILY_MCP_URL

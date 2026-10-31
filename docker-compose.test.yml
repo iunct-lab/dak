@@ -1,0 +1,61 @@
+# Integration-test overrides: run the full stack against a deterministic
+# fake LLM so no API keys are needed.
+#
+#   export COMPOSE_FILE=$(./scripts/compose_files.sh test)   # adds compose/test/*.yml
+#   docker compose up -d --build --wait
+#   cd tests/integration && uv run pytest
+#   docker compose down -v
+#
+# The features' test services are in compose/test/ (docs/test_matrix.md).
+
+services:
+  fake-llm:
+    build: ./tests/integration/fake_llm
+    ports:
+      - "127.0.0.1:8089:8080"
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8080/health')"]
+      interval: 2s
+      timeout: 5s
+      retries: 15
+
+  agent:
+    environment:
+      # docker-compose.yml の開発用 API を切る（#729）
+      - DAK_DEV_API=
+      - MODEL_NAME=openai/fake-default
+      - OPENAI_API_BASE=http://fake-llm:8080/v1
+      - OPENAI_API_KEY=dummy
+      # Claude route for tests/integration/test_thinking_blocks.py (the fake LLM's /v1/messages)
+      - ANTHROPIC_API_BASE=http://fake-llm:8080
+      - ANTHROPIC_API_KEY=dummy
+      - DAK_ALLOWED_MODELS=openai/fake-default,openai/fake-alt,anthropic/fake-claude
+      # The stack's own mcp-server stands in for a caller's MCP server (dak:tools.mcp_servers).
+      - DAK_ALLOWED_MCP_URLS=http://mcp-server:8000/mcp,http://caller-mcp-unreachable:8000/mcp
+    # map form: docker-compose.yml's list form is merged into it
+    depends_on:
+      postgres: {condition: service_started}
+      fake-llm: {condition: service_started}
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/list-apps')"]
+      interval: 5s
+      timeout: 10s
+      retries: 30
+      start_period: 20s
+
+  mcp-server:
+    healthcheck:
+      # GET /mcp answers 4xx without a proper MCP handshake; any HTTP response means the server is up
+      test: ["CMD", "python", "-c", "import urllib.request, urllib.error\ntry:\n    urllib.request.urlopen('http://localhost:8000/mcp')\nexcept urllib.error.HTTPError:\n    pass"]
+      interval: 5s
+      timeout: 10s
+      retries: 30
+      start_period: 10s
+
+  bff:
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/')"]
+      interval: 5s
+      timeout: 10s
+      retries: 30
+      start_period: 10s

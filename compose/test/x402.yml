@@ -1,0 +1,70 @@
+# x402 (test_x402_flow.py): fake-x402 (8093) is the paid resource, its facilitator
+# and the Solana RPC; agent-x402 (8018) is the agent with a throwaway key.
+
+services:
+  # tests/integration/test_x402_flow.py: the paid resource, its facilitator
+  # (/verify, /settle) and the Solana RPC (/rpc), all fake. The agent fetches it as
+  # paid.x402.test on x402net: a dotted name with a public address passes the
+  # agent's destination check (agent/dak_agent/outbound_url.py, no allowlist).
+  fake-x402:
+    build: ./tests/integration/fake_x402
+    ports:
+      - "127.0.0.1:8093:8080"
+    networks:
+      default: {}
+      x402net:
+        ipv4_address: 11.0.42.10
+        aliases:
+          - paid.x402.test
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8080/health')"]
+      interval: 2s
+      timeout: 5s
+      retries: 15
+
+  # The agent with the x402 skill and a Solana key made when it starts (thrown
+  # away with the container; no key is in the repository). The RPC is the
+  # operator's choice, not the model's, so it is reached by service name.
+  agent-x402:
+    build: ./agent
+    ports:
+      - "127.0.0.1:8018:8000"
+    networks:
+      - default
+      - x402net
+    environment:
+      - PYTHONUNBUFFERED=1
+      - DATABASE_URL=postgresql://username:${POSTGRES_PASSWORD}@postgres:5432/postgres
+      - SESSION_SERVICE_URI=postgresql+asyncpg://username:${POSTGRES_PASSWORD}@postgres:5432/postgres
+      - MCP_SERVER_URL=http://mcp-server:8000/mcp
+      - MODEL_NAME=openai/fake-x402
+      - OPENAI_API_BASE=http://fake-llm:8080/v1
+      - OPENAI_API_KEY=dummy
+      - SOLANA_RPC_URL=http://fake-x402:8080/rpc
+      - AGENT_SKILLS_DIRS=/app/skills
+    command:
+      - sh
+      - -c
+      - >-
+        export SOLANA_PRIVATE_KEY="$$(uv run python -c 'from solders.keypair import Keypair; print(Keypair())')"
+        && exec uv run uvicorn dak_agent.server:app --host 0.0.0.0 --port 8000
+    depends_on:
+      - postgres
+      - fake-llm
+      - fake-x402
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/list-apps')"]
+      interval: 5s
+      timeout: 10s
+      retries: 30
+      start_period: 20s
+
+networks:
+  # Only fake-x402 and agent-x402. The subnet is a public range so the agent's
+  # destination check lets paid.x402.test through; the network is internal (no
+  # route out), so nothing reaches the range's real owner.
+  x402net:
+    internal: true
+    ipam:
+      config:
+        - subnet: 11.0.42.0/24

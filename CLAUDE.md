@@ -1,0 +1,68 @@
+# CLAUDE.md
+
+Claude Code 向けのリポジトリ・ガイド。エージェント全般の設計思想は `AGENTS.md` を、
+目的・スコープの判断軸は `docs/CHARTER.md` を参照（このファイルはそれらを補完する）。
+
+## アーキテクチャ地図（4 サービス + テスト）
+
+開発は Private の開発用リポジトリ、公開は `iunct-lab/dak`（`docs/maintenance/public-repo.md`）。
+
+独立コンテナの疎結合モノレポ（各ディレクトリが独自 `pyproject.toml`/`uv.lock`）:
+
+| dir | 役割 | ポート(host) |
+|-----|------|------|
+| `agent/` | google-adk ベースのコアエージェント（`dak_agent/`）。A2A + MCP + adaptive mode + コンテキストハーネス（`harness.py`, `docs/architecture/harness_engineering.md`） | 8000 |
+| `mcp-server/` | FastMCP ツールサーバ（`main.py`, `policy.py` の安全層） | 8001 |
+| `bff/` | HTMX 用 Backend-for-Frontend（FastAPI） | 8002 |
+| `cli/` | `dak-cli`（Typer/Rich） | — |
+| `deploy/aws/` | Lambda 配置の SAM テンプレートと dev 用の呼び出し元役（`README.md`、`docs/architecture/serverless.md`） | — |
+| `tests/integration/` | Docker 横断の統合/E2E（fake-LLM, Playwright, 実LLMスモーク） | — |
+| `maintenance/` | 自己保守ツールキット（依存トリアージ）。`docs/maintenance/README.md` | — |
+
+## テスト 3 層（速い順）
+
+```bash
+# 1. コンポーネント単体（速い・Docker不要）
+cd agent && uv sync && uv run pytest -q     # cli / bff / mcp-server / maintenance も同様
+
+# 2. 統合（fake-LLM, APIキー不要, 決定論）。.env に POSTGRES_PASSWORD が要る（無ければ echo "POSTGRES_PASSWORD=$(openssl rand -hex 32)" >> .env）
+COMPOSE_FILE=$(./scripts/compose_files.sh test) docker compose up -d --build --wait   # 機能のテスト用の構成は compose/test/<機能>.yml（docs/test_matrix.md）
+(cd tests/integration && uv sync && uv run pytest -q)
+COMPOSE_FILE=$(./scripts/compose_files.sh test) docker compose down -v
+
+# 3. 実LLMスモーク（Ollama, ゲート付き）
+./scripts/smoke_local_llm.sh            # DAK_SMOKE_REAL_LLM=1 で有効化
+```
+
+fake-LLM はモデル名ごとに応答をスクリプトできる制御API（`/script/{model}`）を持つ。
+これが決定論テストとゴールデン再生（`tests/integration/golden/`）の継ぎ目。
+
+## 持続可能化システム（このリポジトリの自己保守）
+
+`docs/maintenance/README.md` が全体像。要点:
+
+- **定期の workflow は #822 でやめた**（依存の triage・tech-watch・nightly eval・charter review・feature sync。経緯と手放した情報は `docs/maintenance/README.md`）。残る workflow は `ci.yml` と `labels.yml` だけ。
+- **依存更新・新技術ウォッチ・継続テストのロジックは残してある**: `maintenance/dak_maintenance`（CLI `dak-maint`）と、DAK スキル `agent/skills/dependency_maintenance/`。手元で回す。回帰の検知は統合テストと実 LLM スモーク（`docs/eval/`）。
+- **すべての作業は GitHub Project 管理**（DAK の Project の固有の値は root の `ops.config.json`）。
+
+## 保守・検証の入口
+
+- 公開リポジトリへの同期: `ops-kit public-sync`（共通キットの `bin/ops-kit`。`--dry-run` は送らずに結果だけ出す）。公開先・外すファイル・書き換えるファイルは root の `ops.config.json` の `publicSync`。仕組みはキットの README の「公開リポジトリへの同期」、このリポジトリの手順は `docs/maintenance/public-repo.md`。
+- 新技術ウォッチ・依存の新機能・憲章見直し・依存の triage は、手元で `dak-maint` を回す（定期の workflow は #822 でやめた）。
+- ロジックは `maintenance/`（CLI `dak-maint`、`maintenance/README.md`）、判断基準は `docs/CHARTER.md`。手元で `dak-maint` の `watch` / `feature-sync` / `charter-review` を回すには `MAINT_LLM_*`（`watch` と `charter-review` は `TAVILY_API_KEY` も）が要る。`triage` は無くても動く。
+- テストは上の「テスト 3 層」。
+- ランタイムの DAK スキル（`agent/skills/`）の作り方は `agent/skills/README.md`。
+
+コーディングエージェント向けの共通スキル・規約・スラッシュコマンドは、このリポジトリに置かない（ユーザーレベルで提供される）。
+このファイルと `AGENTS.md` には DAK 固有のことだけを書く。
+
+## 規約
+
+- 「System ENABLES, Agent DECIDES」— 暗黙の副作用（特に決済）を足さない。
+- 独立コンテナ/疎結合を壊さない（他コンポーネントの内部実装に依存しない）。
+- 鍵の値をファイル（スクリプト・テスト・ドキュメント）に書かない。実行中のコンテナや `.env` から値をコピーせず、環境変数から読む。
+  クローンしたら `scripts/setup/install_hooks.sh` で pre-commit と pre-push（どちらも gitleaks）を有効にする。CI の `secrets` ジョブも全履歴を走査する。
+  標準で検出されない鍵の形式は `.gitleaks.toml` にルールを足す。検出を `.gitleaksignore` で黙らせるのは、失効を確認した鍵だけ。
+- push 前・PR レビューでは、`docs/security/review-checklist.md` の「LLM が見る項目」を確かめる。検査の入口は `scripts/security/check.sh`（フック・gitleaks・範囲をまとめて確かめ、項目の一覧も出す）。
+- 変更にはテストを添える。コミットは Conventional Commits 風（`feat:`/`fix:`/`test:`/`deps:`）。
+- 共有のファイル（`docker-compose.yml`・`docker-compose.test.yml`・`agent/agent_config.yaml`・`.github/workflows/*.yml`・`CLAUDE.md`）を触る変更は、PBI の最初の Task として小さく切り出し、先にマージする。機能ごとのファイルの置き場は、環境変数が `env.example.d/<NN>-<節>.env`、MCP サーバと A2A の相手が `agent/agent_config.d/mcp_servers/<name>.yaml`・`agent/agent_config.d/a2a_peers/<name>.yaml`、compose のサービスが `compose/base/<機能>.yml`（既定の構成）と `compose/test/<機能>.yml`（機能のテスト用）。それらを足す Task は、ディレクトリではなくファイル名で名指しする（並列ガードはディレクトリの名指しを、その中の全部との重なりとみなす）。

@@ -1,0 +1,21 @@
+services:
+  # tests/integration/test_otel_export.py: the OTLP endpoint the agent exports its
+  # GenAI spans to. (8091 is fake-tavily's.)
+  otlp-sink:
+    build: ./tests/integration/otlp_sink
+    ports:
+      - "127.0.0.1:8092:4318"
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:4318/health')"]
+      interval: 2s
+      timeout: 5s
+      retries: 15
+
+  agent:
+    environment:
+      # tests/integration/test_otel_export.py: spans go to otlp-sink (no LangFuse key here)
+      - OTEL_EXPORTER_OTLP_ENDPOINT=http://otlp-sink:4318
+      - OTEL_EXPORTER_OTLP_PROTOCOL=http/protobuf
+      - OTEL_BSP_SCHEDULE_DELAY=500
+    depends_on:
+      otlp-sink: {condition: service_started}

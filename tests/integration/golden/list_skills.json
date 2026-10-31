@@ -1,0 +1,12 @@
+{
+  "name": "list_skills",
+  "prompt": "What skills do you have?",
+  "model": "fake-default",
+  "script": [
+    {"tool_call": {"name": "list_skills", "args": {}}},
+    {"text": "Here are the skills."}
+  ],
+  "expect": {
+    "function_calls": ["list_skills"]
+  }
+}

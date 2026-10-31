@@ -1,0 +1,11 @@
+#!/bin/sh
+# ステージした差分に鍵の値が無いかを gitleaks で確かめる（#289）。
+# 有効化: git config core.hooksPath .githooks
+if ! command -v gitleaks >/dev/null 2>&1; then
+  echo "pre-commit: gitleaks が見つからないのでコミットを止めました。" >&2
+  echo "  入れ方: brew install gitleaks（他の OS は https://github.com/gitleaks/gitleaks#installing）" >&2
+  exit 1
+fi
+root=$(git rev-parse --show-toplevel)
+exec gitleaks git --pre-commit --staged --redact --no-banner \
+  --config "$root/.gitleaks.toml" --gitleaks-ignore-path "$root/.gitleaksignore" "$root"

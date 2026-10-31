@@ -1,0 +1,30 @@
+# Run the DAK application against a llama.cpp server (llama-server).
+#
+# llama-server exposes an OpenAI-compatible /v1 endpoint, so the agents use the
+# same "openai/" LiteLLM provider as the fake-LLM stack — just pointed at the
+# real server. The server itself is NOT managed by compose: it runs wherever
+# the GPU is (this machine, a Colab VM behind an SSH forward, or a LAN GPU box)
+# and is reached on the HOST at LLAMACPP_API_BASE. See
+# docs/guides/local_llm_llamacpp.md for per-machine setups.
+#
+# Usage (layer on top of the normal application stack):
+#   llama-server -hf <model.gguf> --port 18080 --jinja -c 8192   # or an SSH tunnel to :18080
+#   docker compose -f docker-compose.yml -f docker-compose.llamacpp.yml up -d --build
+# Set LLAMACPP_API_BASE if the endpoint is not exposed on host port 18080.
+#
+# llama-server serves whatever model it was started with and ignores the model
+# name in requests, so LLAMACPP_MODEL_NAME only needs the "openai/" prefix.
+
+services:
+  agent:
+    environment:
+      MODEL_NAME: ${LLAMACPP_MODEL_NAME:-openai/llamacpp}
+      OPENAI_API_BASE: ${LLAMACPP_API_BASE:-http://host.docker.internal:18080/v1}
+      # The OpenAI client validates that a key exists even though llama-server
+      # does not authenticate a typical local endpoint.
+      OPENAI_API_KEY: ${LLAMACPP_API_KEY:-not-used}
+      # The agent's context budgets are derived from this; keep it equal to the
+      # server's -c (llama-server defaults to a smaller context when -c is omitted).
+      MODEL_CONTEXT_WINDOW: ${LLAMACPP_CONTEXT_SIZE:-8192}
+    extra_hosts:
+      - "host.docker.internal:host-gateway"

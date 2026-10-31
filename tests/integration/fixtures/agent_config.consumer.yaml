@@ -1,0 +1,3 @@
+# agent-consumer in compose/test/a2a.yml: a DAK that hands tasks to agent-peer over A2A.
+# Its MCP server and peer are in agent_config.consumer.d/, mounted over the image's agent_config.d/.
+permissions: []

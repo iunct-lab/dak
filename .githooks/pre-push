@@ -1,0 +1,32 @@
+#!/bin/sh
+# Scan the commits being pushed for secrets before they become public (#291).
+# This repository is public: a push publishes. pre-commit only sees staged
+# changes, so commits made with `git commit --no-verify` are caught here.
+# (`git push --no-verify` skips this hook.) Enable: scripts/setup/install_hooks.sh
+remote=$1
+root=$(git rev-parse --show-toplevel)
+# The remote-tracking refs the pushed commits are compared with: this remote's
+# when the push names one, all of them when it gives a URL or a path.
+if git remote | grep -qxF -- "$remote"; then
+  known="--remotes=$remote"
+else
+  known="--remotes"
+fi
+fail=0
+while read -r local_ref local_sha remote_ref remote_sha; do
+  case "$local_sha" in *[!0]*) ;; *) continue ;; esac  # a branch deletion: nothing to scan
+  case "$remote_sha" in *[!0]*) remote_known=1 ;; *) remote_known=0 ;; esac
+  if [ "$remote_known" = 1 ] && git cat-file -e "$remote_sha^{commit}" 2>/dev/null; then
+    range="$remote_sha..$local_sha"
+  else
+    # A new branch, or the remote moved to a commit this clone never fetched
+    # (e.g. a force push from another machine): the commits no remote-tracking
+    # ref has yet.
+    range="$local_sha --not $known"
+  fi
+  sh "$root/scripts/security/check.sh" --range "$range" --no-checklist </dev/null || fail=1
+done
+if [ "$fail" != 0 ]; then
+  echo "pre-push: push stopped. Remove the secret from the commits (rewrite them), then push again." >&2
+fi
+exit "$fail"

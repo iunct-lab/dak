@@ -1,0 +1,18 @@
+services:
+  # tests/integration/test_lambda_entry.py: the Lambda image (agent/Dockerfile.lambda) run
+  # with the runtime interface emulator, read-only root file system, no session database.
+  agent-lambda:
+    build:
+      context: ./agent
+      dockerfile: Dockerfile.lambda
+    read_only: true
+    tmpfs:
+      - /tmp
+    ports:
+      - "127.0.0.1:8016:8080"
+    environment:
+      - MODEL_NAME=openai/fake-lambda
+      - OPENAI_API_BASE=http://fake-llm:8080/v1
+      - OPENAI_API_KEY=dummy
+    depends_on:
+      - fake-llm

@@ -1,0 +1,59 @@
+# Real-LLM smoke verification against a cheap CLOUD model (API key required).
+#
+# The fake-LLM stack (docker-compose.test.yml, compose/test/) pins the agents to the fake
+# OpenAI endpoint; this overlay re-points them at a real provider. Layer it:
+#   COMPOSE_FILE=$(./scripts/compose_files.sh test):docker-compose.cloud-llm.yml \
+#     docker compose up -d --wait
+# Or simply: ./scripts/smoke_cloud_llm.sh
+#
+# Default model is openai/gpt-5.6-luna ($0.20 in / $1.20 out per 1M tok as of
+# 2026-08): the best tool-calling reliability per dollar we found. A full smoke
+# run costs on the order of a few cents. Other candidates (prices as of 2026-08):
+#   openai/gpt-5-nano                                      $0.05 / $0.40 (cheapest)
+#   gemini/gemini-3.5-flash-lite                           $0.30 / $2.50
+#   gemini/gemini-3.8-flash                                $0.75 / $3.75 (promo pricing as of 2026-09)
+#   bedrock/us.anthropic.claude-haiku-4-5-20251001-v1:0    $1.00 / $5.00
+# Note the gemini rows cost MORE per token than the default. 3.5-flash-lite is
+# listed for its free tier (zero-cost smoke runs); 3.8-flash is listed for
+# vetting the agent's built-in default (config.py). Its free tier has a small daily request
+# quota (~20 RPD reported 2026-09) that a full smoke run across three agents
+# will exhaust, so use a billed key for it.
+#
+# Override with CLOUD_MODEL_NAME (LiteLLM format). Credentials come from the
+# host environment / .env (Bedrock auth: docs/getting-started/bedrock.md).
+
+# agent-enforcer / agent-ap2 are defined in compose/test/ without
+# env_file or credential pass-through (only the base `agent` service has them),
+# so this anchor wires every provider credential to all three services.
+# Valueless entries resolve from the shell env (or stay unset — no empty-string
+# injection); .env values arrive via env_file.
+x-cloud-llm: &cloud-llm
+  env_file:
+    - .env
+  environment:
+    - MODEL_NAME=${CLOUD_MODEL_NAME:-openai/gpt-5.6-luna}
+    # The fake-LLM stack points these at the fake LLM; restore the real
+    # ones. ":-" keeps a user-supplied OPENAI_API_BASE (e.g. an
+    # OpenAI-compatible proxy like OpenRouter) intact.
+    - OPENAI_API_BASE=${OPENAI_API_BASE:-https://api.openai.com/v1}
+    - OPENAI_API_KEY
+    - GOOGLE_API_KEY
+    - GEMINI_API_KEY=${GOOGLE_API_KEY:-}
+    - ANTHROPIC_API_KEY
+    - AWS_REGION_NAME
+    - AWS_REGION
+    - AWS_DEFAULT_REGION
+    - AWS_BEARER_TOKEN_BEDROCK
+    - AWS_ACCESS_KEY_ID
+    - AWS_SECRET_ACCESS_KEY
+    - AWS_SESSION_TOKEN
+
+services:
+  agent:
+    <<: *cloud-llm
+
+  agent-enforcer:
+    <<: *cloud-llm
+
+  agent-ap2:
+    <<: *cloud-llm
